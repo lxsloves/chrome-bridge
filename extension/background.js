@@ -1,7 +1,9 @@
 const DAEMON = "http://127.0.0.1:17321";
 const BRIDGE_HEADERS = { "X-Cursor-Chrome-Bridge": "1" };
+const POLL_ALARM = "chrome-bridge-poll";
 const cache = new Map(); // tabId -> { elements, viewport }
 const dbgOn = new Set();
+let pumpRunning = false;
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -667,4 +669,25 @@ async function pump() {
   }
 }
 
-pump();
+async function ensurePump() {
+  if (pumpRunning) return;
+  pumpRunning = true;
+  try {
+    await pump();
+  } finally {
+    pumpRunning = false;
+  }
+}
+
+async function startBridge() {
+  await chrome.alarms.create(POLL_ALARM, { periodInMinutes: 0.5 });
+  void ensurePump();
+}
+
+chrome.runtime.onInstalled.addListener(() => void startBridge());
+chrome.runtime.onStartup.addListener(() => void startBridge());
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === POLL_ALARM) void ensurePump();
+});
+
+void startBridge();
