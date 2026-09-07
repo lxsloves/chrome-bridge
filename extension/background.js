@@ -649,10 +649,10 @@ async function report(id, payload) {
 async function pump() {
   for (;;) {
     try {
-      const r = await fetch(`${DAEMON}/pull`, { headers: BRIDGE_HEADERS });
-      const cmd = await r.json();
       chrome.action.setBadgeText({ text: "ON" });
       chrome.action.setBadgeBackgroundColor({ color: "#0a0" });
+      const r = await fetch(`${DAEMON}/pull`, { headers: BRIDGE_HEADERS });
+      const cmd = await r.json();
       if (cmd && !cmd.idle && cmd.id) {
         try {
           const data = await runCmd(cmd);
