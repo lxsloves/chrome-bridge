@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Cursor Chrome Bridge",
   "version": "0.3.0",
-  "description": "让本机 Cursor 按 Codex 方式操作已打开的 Chrome 标签（只连 127.0.0.1）",
+  "description": "通过本地服务操作已打开的 Chrome 标签页",
   "permissions": ["tabs", "scripting", "activeTab", "debugger", "alarms"],
   "host_permissions": ["<all_urls>", "http://127.0.0.1:17321/*"],
   "background": { "service_worker": "background.js" },
