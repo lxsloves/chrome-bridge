@@ -1,12 +1,21 @@
 const DAEMON = "http://127.0.0.1:17321";
 const BRIDGE_HEADERS = { "X-Cursor-Chrome-Bridge": "1" };
 const POLL_ALARM = "chrome-bridge-poll";
+const COMMAND_TIMEOUT_MS = 35_000;
 const cache = new Map(); // tabId -> { elements, viewport }
 const dbgOn = new Set();
 let pumpRunning = false;
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function withTimeout(task, timeoutMs, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([task, timeout]).finally(() => clearTimeout(timer));
 }
 
 async function resolveTab(cmd) {
@@ -267,9 +276,11 @@ async function attachDbg(tabId) {
   }
 }
 
-chrome.debugger.onDetach.addListener((src) => {
-  if (src.tabId) dbgOn.delete(src.tabId);
-});
+if (typeof chrome !== "undefined") {
+  chrome.debugger.onDetach.addListener((src) => {
+    if (src.tabId) dbgOn.delete(src.tabId);
+  });
+}
 
 async function cdp(tabId, method, params) {
   if (!(await attachDbg(tabId))) throw new Error("debugger attach failed");
@@ -655,7 +666,11 @@ async function pump() {
       const cmd = await r.json();
       if (cmd && !cmd.idle && cmd.id) {
         try {
-          const data = await runCmd(cmd);
+          const data = await withTimeout(
+            runCmd(cmd),
+            COMMAND_TIMEOUT_MS,
+            "command timed out; the action may have completed, verify before retrying"
+          );
           await report(cmd.id, { ok: true, data });
         } catch (e) {
           await report(cmd.id, { ok: false, error: String(e && e.message ? e.message : e) });
@@ -684,10 +699,13 @@ async function startBridge() {
   void ensurePump();
 }
 
-chrome.runtime.onInstalled.addListener(() => void startBridge());
-chrome.runtime.onStartup.addListener(() => void startBridge());
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === POLL_ALARM) void ensurePump();
-});
+if (typeof chrome !== "undefined") {
+  chrome.runtime.onInstalled.addListener(() => void startBridge());
+  chrome.runtime.onStartup.addListener(() => void startBridge());
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === POLL_ALARM) void ensurePump();
+  });
+  void startBridge();
+}
 
-void startBridge();
+if (typeof module !== "undefined") module.exports = { withTimeout };
