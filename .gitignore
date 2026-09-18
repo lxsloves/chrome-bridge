@@ -2,7 +2,7 @@ last.jpg
 last.json
 last.txt
 last-read.txt
-daemon.log
+daemon*.log
 __pycache__/
 *.pyc
 .DS_Store

@@ -1,5 +1,5 @@
 const DAEMON = "http://127.0.0.1:17321";
-const BRIDGE_HEADERS = { "X-Cursor-Chrome-Bridge": "1" };
+const BRIDGE_HEADERS = { "X-Chrome-Bridge": "1" };
 const POLL_ALARM = "chrome-bridge-poll";
 const COMMAND_TIMEOUT_MS = 35_000;
 const cache = new Map(); // tabId -> { elements, viewport }

@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-BRIDGE_HOME="${CHROME_BRIDGE_HOME:-$HOME/.cursor/chrome-bridge}"
-SKILLS_HOME="${CURSOR_SKILLS_HOME:-$HOME/.cursor/skills}"
+BRIDGE_HOME="${CHROME_BRIDGE_HOME:-$HOME/.chrome-bridge}"
+SKILLS_HOME="${CHROME_BRIDGE_SKILLS_HOME:-$HOME/.agents/skills}"
 
 link_dir() {
   local source="$1" target="$2"
@@ -24,6 +24,6 @@ link_dir "$ROOT" "$BRIDGE_HOME"
 link_dir "$ROOT/skills/chrome-bridge" "$SKILLS_HOME/chrome-bridge"
 
 echo "installed bridge: $BRIDGE_HOME"
-echo "installed Cursor skill: $SKILLS_HOME/chrome-bridge"
+echo "installed agent skill: $SKILLS_HOME/chrome-bridge"
 echo "next: $BRIDGE_HOME/cb start"
 echo "then load this unpacked extension in Chrome: $BRIDGE_HOME/extension"

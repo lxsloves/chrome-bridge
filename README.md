@@ -1,8 +1,10 @@
-# Cursor Chrome Bridge
+# Chrome Bridge
 
-让 Cursor 直接操作你平时在用的 Chrome。
+让 agent 直接操作你平时在用的 Chrome。
 
-很多浏览器自动化工具会另外启动一个干净的浏览器，登录状态、扩展和正在看的页面都不在里面。这个项目换了一种做法：保留现有 Chrome 会话，通过一个本地服务把 Cursor 的操作转给浏览器扩展。查资料、读后台页面或处理只能登录后访问的内容时，不用再开一套浏览器。
+很多浏览器自动化工具会另外启动一个干净的浏览器，登录状态、扩展和正在看的页面都不在里面。这个项目换了一种做法：保留现有 Chrome 会话，通过一个本地服务把 agent 的操作转给浏览器扩展。查资料、读后台页面或处理只能登录后访问的内容时，不用再开一套浏览器。
+
+任何能执行 shell 命令的 agent 都能用，不绑定某个 IDE。
 
 整个链路只走 `127.0.0.1`，没有云端中转。
 
@@ -13,15 +15,14 @@
 - Google Chrome
 - Python 3
 - `curl`
-- Cursor
 
 克隆仓库并安装：
 
 ```bash
-git clone https://github.com/lxsloves/cursor-chrome-bridge.git
-cd cursor-chrome-bridge
+git clone https://github.com/lxsloves/chrome-bridge.git
+cd chrome-bridge
 ./install.sh
-~/.cursor/chrome-bridge/cb start
+~/.chrome-bridge/cb start
 ```
 
 接着安装 Chrome 扩展：
@@ -29,23 +30,23 @@ cd cursor-chrome-bridge
 1. 打开 `chrome://extensions/`
 2. 开启右上角的「开发者模式」
 3. 点击「加载已解压的扩展程序」
-4. 选择 `~/.cursor/chrome-bridge/extension`
+4. 选择 `~/.chrome-bridge/extension`
 
 扩展图标出现绿色 `ON`，说明已经连上本地服务。可以用下面两条命令确认：
 
 ```bash
-~/.cursor/chrome-bridge/cb health
-~/.cursor/chrome-bridge/cb tabs
+~/.chrome-bridge/cb health
+~/.chrome-bridge/cb tabs
 ```
 
-安装脚本还会把仓库里的 Skill 链接到 `~/.cursor/skills/chrome-bridge`。重启 Cursor 后，可以直接让它查看或操作已经打开的 Chrome 页面。
+安装脚本还会把仓库里的 Skill 链接到 `~/.agents/skills/chrome-bridge`，agent 读到它就知道该怎么用 bridge。目录可用 `CHROME_BRIDGE_HOME` / `CHROME_BRIDGE_SKILLS_HOME` 覆盖。
 
 ## 先试一下
 
 下面这组命令覆盖了最常见的使用方式：
 
 ```bash
-CB=~/.cursor/chrome-bridge/cb
+CB=~/.chrome-bridge/cb
 
 $CB tabs                         # 查看当前标签页
 $CB read github.com              # 读取匹配页面的正文
@@ -103,7 +104,7 @@ $CB raw '{"action":"drag","tabId":123,"from_element":2,"to_element":9,"capture_a
 ## 它是怎么连起来的
 
 ```text
-Cursor / cb
+agent / cb
     |
     | HTTP (127.0.0.1:17321)
     v
@@ -142,6 +143,17 @@ Chrome 不会自动刷新已解压扩展，需要在扩展管理页手动点一�
 **提示匹配到多个标签页**
 
 运行 `cb tabs`，改用具体的 `tabId`，不要继续扩大 URL 匹配范围。
+
+**Windows 上报「找不到命令」或连不上**
+
+`cb` 是 bash 脚本，用 Git Bash 跑。另外它调用的是 `python3`，而 Windows 版 Python
+只装出 `python.exe`；PATH 里的 `python3` 往往落到 Microsoft Store 的占位程序上。
+补一个同名副本即可：
+
+```powershell
+$d = "$env:LOCALAPPDATA\Programs\Python\Python313"
+Copy-Item "$d\python.exe" "$d\python3.exe"
+```
 
 **端口已经被占用**
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cursor <-> 本机 Chrome 扩展的 localhost 桥。只绑 127.0.0.1。"""
+"""本机 Chrome <-> agent 的 localhost 桥。只绑 127.0.0.1。"""
 from __future__ import annotations
 
 import base64
@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 HOST, PORT = "127.0.0.1", 17321
 MAX_BODY_BYTES = 15_000_000
-BRIDGE_HEADER = "X-Cursor-Chrome-Bridge"
+BRIDGE_HEADER = "X-Chrome-Bridge"
 ROOT = Path(__file__).resolve().parent
 SHOT = ROOT / "last.jpg"
 INDEX = ROOT / "last.json"

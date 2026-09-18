@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Thin client for Cursor Chrome Bridge daemon.
+# Thin client for the Chrome Bridge daemon.
 set -euo pipefail
 DAEMON="${CHROME_BRIDGE_URL:-http://127.0.0.1:17321}"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
