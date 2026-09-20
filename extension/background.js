@@ -1,7 +1,8 @@
 const DAEMON = "http://127.0.0.1:17321";
 const BRIDGE_HEADERS = { "X-Chrome-Bridge": "1" };
 const POLL_ALARM = "chrome-bridge-poll";
-const COMMAND_TIMEOUT_MS = 35_000;
+const COMMAND_TIMEOUT_MS = 90_000;
+const BATCH_TIMEOUT_MS = 180_000;
 const cache = new Map(); // tabId -> { elements, viewport }
 const dbgOn = new Set();
 let pumpRunning = false;
@@ -50,6 +51,145 @@ function xyOf(cmd, tabId) {
   const hit = (cache.get(tabId)?.elements || []).find((e) => e.id === id);
   if (!hit) throw new Error(`element ${id} not in cache; capture first`);
   return [Math.round(hit.x + hit.w / 2), Math.round(hit.y + hit.h / 2)];
+}
+
+function asXy(v) {
+  return Array.isArray(v) && v.length >= 2 ? [v[0], v[1]] : null;
+}
+
+/** Resolve drag endpoints; accepts from_coordinate/to_coordinate and aliases. */
+function dragEndpoints(cmd, tabId, lookup = xyOf) {
+  const from =
+    asXy(cmd.from_coordinate) ||
+    (cmd.from_element != null ? lookup({ element: cmd.from_element }, tabId) : null) ||
+    asXy(cmd.coordinate) ||
+    (cmd.x != null && cmd.y != null ? [cmd.x, cmd.y] : null) ||
+    (cmd.element != null || cmd.ref != null ? lookup(cmd, tabId) : null);
+  const to =
+    asXy(cmd.to_coordinate) ||
+    asXy(cmd.endCoordinate) ||
+    asXy(cmd.end_coordinate) ||
+    (cmd.to_element != null ? lookup({ element: cmd.to_element }, tabId) : null);
+  return { from, to };
+}
+
+function canvasPoint(cmd, tabId) {
+  try {
+    if (cmd.coordinate || (cmd.x != null && cmd.y != null) || cmd.element != null || cmd.ref != null) {
+      const pt = xyOf(cmd, tabId);
+      if (pt) return pt;
+    }
+  } catch (_) {}
+  const vp = cache.get(tabId)?.viewport || { w: 800, h: 600 };
+  // slightly right of center to miss left sidebar (蓝湖 etc.)
+  return [Math.round(vp.w * 0.62), Math.round(vp.h * 0.5)];
+}
+
+function commandTimeoutMs(cmd) {
+  const cap = BATCH_TIMEOUT_MS;
+  if (cmd.timeout_ms != null) return Math.min(Math.max(Number(cmd.timeout_ms) || COMMAND_TIMEOUT_MS, 1000), cap);
+  if (cmd.timeout != null) {
+    const t = Number(cmd.timeout);
+    const ms = t > 1000 ? t : t * 1000;
+    return Math.min(Math.max(ms || COMMAND_TIMEOUT_MS, 1000), cap);
+  }
+  return cmd.action === "batch" ? BATCH_TIMEOUT_MS : COMMAND_TIMEOUT_MS;
+}
+
+/** Read on-page zoom label like "60%" (蓝湖 bottom-right). Returns null if absent. */
+function injectZoomPct() {
+  const re = /^(\d+)\s*%$/;
+  let best = null;
+  const walk = (node) => {
+    if (node.nodeType === 3) {
+      const m = String(node.textContent || "").trim().match(re);
+      if (!m) return;
+      const el = node.parentElement;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      if (!(r.width > 0 && r.height > 0)) return;
+      // prefer bottom-right chrome (canvas app zoom HUD)
+      const score = r.bottom + r.right;
+      if (!best || score > best.score) best = { pct: Number(m[1]), score };
+      return;
+    }
+    if (node.nodeType === 1) {
+      for (const c of node.childNodes) walk(c);
+    }
+  };
+  walk(document.body);
+  return best ? best.pct : null;
+}
+
+async function wheelZoom(tabId, x, y, deltaY) {
+  // Ctrl+wheel: works for most canvas apps (incl. 蓝湖); cmd+/- / UI buttons often do not
+  await cdp(tabId, "Input.dispatchMouseEvent", {
+    type: "mouseWheel",
+    x,
+    y,
+    deltaX: 0,
+    deltaY,
+    modifiers: 2,
+  });
+}
+
+/**
+ * Zoom canvas under the cursor.
+ * - in/out: amount = wheel ticks (default 3)
+ * - fit: roll toward targetPct (default 55); amount = max ticks (default 24)
+ *   ponytail: DOM % label only; apps without a % HUD fall back to mild zoom-out
+ */
+async function doZoom(tabId, cmd) {
+  const dir = String(cmd.direction || "out").toLowerCase();
+  if (!/^(in|out|fit)$/.test(dir)) throw new Error("zoom direction must be in|out|fit");
+  const [x, y] = canvasPoint(cmd, tabId);
+  if (!(await attachDbg(tabId))) throw new Error("zoom needs debugger; reload the extension");
+
+  if (dir === "fit") {
+    await mouse(tabId, x, y, { button: "left", count: 1 });
+    await sleep(150);
+    const target = Number(cmd.target ?? cmd.targetPct ?? 55);
+    const maxTicks = Math.min(Math.max(Number(cmd.amount || 24), 1), 40);
+    let pct = await runInTab(tabId, injectZoomPct);
+    let ticks = 0;
+    let prev = null;
+    let stuck = 0;
+    if (pct == null) {
+      // no % HUD — mild zoom-out only, never blast to 1%
+      const n = Math.min(6, maxTicks);
+      for (let i = 0; i < n; i++) {
+        await wheelZoom(tabId, x, y, 120);
+        await sleep(30);
+        ticks++;
+      }
+      return { ok: true, via: "cdp", direction: "fit", target, pct: null, amount: ticks, x, y, tabId };
+    }
+    while (ticks < maxTicks) {
+      if (Math.abs(pct - target) <= 12) break;
+      await wheelZoom(tabId, x, y, pct > target ? 120 : -120);
+      ticks++;
+      await sleep(40);
+      const next = await runInTab(tabId, injectZoomPct);
+      if (next == null) break;
+      if (next === prev) {
+        stuck++;
+        if (stuck >= 3) break;
+      } else {
+        stuck = 0;
+      }
+      prev = next;
+      pct = next;
+    }
+    return { ok: true, via: "cdp", direction: "fit", target, pct, amount: ticks, x, y, tabId };
+  }
+
+  const ticks = Math.min(Math.max(Number(cmd.amount || 3), 1), 40);
+  const deltaY = dir === "in" ? -120 : 120;
+  for (let i = 0; i < ticks; i++) {
+    await wheelZoom(tabId, x, y, deltaY);
+    await sleep(25);
+  }
+  return { ok: true, via: "cdp", direction: dir, amount: ticks, x, y, tabId };
 }
 
 function formatIndex(elements) {
@@ -486,6 +626,35 @@ async function handle(cmd) {
   if (action === "new_tab") action = "open";
   if (action === "close_tab") action = "close";
 
+  if (action === "batch") {
+    const steps = cmd.steps || cmd.actions;
+    if (!Array.isArray(steps) || !steps.length) throw new Error("batch needs steps:[{action,...}]");
+    const results = [];
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      if (!step || !step.action) throw new Error(`batch step ${i} needs action`);
+      const merged = { ...cmd, ...step, action: step.action };
+      delete merged.steps;
+      delete merged.actions;
+      delete merged.timeout_ms;
+      delete merged.timeout;
+      if (step.capture_after === undefined) delete merged.capture_after;
+      try {
+        const data = await runCmd(merged);
+        results.push({ ok: true, action: step.action, data });
+      } catch (e) {
+        return {
+          ok: false,
+          step: i,
+          action: step.action,
+          error: String(e && e.message ? e.message : e),
+          results,
+        };
+      }
+    }
+    return { ok: true, results };
+  }
+
   if (action === "open") {
     if (!/^https?:\/\//i.test(String(cmd.url || ""))) throw new Error("open needs an http(s) URL");
     const tab = await chrome.tabs.create({ url: cmd.url, active: cmd.active !== false });
@@ -559,6 +728,24 @@ async function handle(cmd) {
   }
   if (action === "capture") {
     return doCapture(tabId, cmd.mode || "som");
+  }
+
+  if (action === "zoom") {
+    return doZoom(tabId, cmd);
+  }
+
+  if (action === "focus_fit") {
+    const pt = xyOf(cmd, tabId);
+    if (!pt) throw new Error("focus_fit needs element or coordinate");
+    await mouse(tabId, pt[0], pt[1], { button: "left", count: 1 });
+    await sleep(500);
+    const zoomed = await doZoom(tabId, {
+      direction: "fit",
+      amount: cmd.amount,
+      target: cmd.target ?? cmd.targetPct,
+      targetPct: cmd.targetPct,
+    });
+    return { ok: true, tabId, clicked: pt, zoom: zoomed };
   }
 
   if (action === "click" || action === "double_click" || action === "right_click" || action === "middle_click" || action === "hover") {
@@ -636,11 +823,12 @@ async function handle(cmd) {
   }
 
   if (action === "drag") {
-    const from = cmd.from_coordinate || (cmd.from_element != null ? xyOf({ element: cmd.from_element }, tabId) : xyOf(cmd, tabId));
-    const to =
-      cmd.to_coordinate ||
-      (cmd.to_element != null ? xyOf({ element: cmd.to_element }, tabId) : null);
-    if (!from || !to) throw new Error("drag needs from_element/to_element or from_coordinate/to_coordinate");
+    const { from, to } = dragEndpoints(cmd, tabId);
+    if (!from || !to) {
+      throw new Error(
+        "drag needs from_coordinate+to_coordinate (or coordinate+endCoordinate), or from_element+to_element"
+      );
+    }
     const [x1, y1] = from;
     const [x2, y2] = to;
     if (await attachDbg(tabId)) {
@@ -690,7 +878,7 @@ async function pump() {
         try {
           const data = await withTimeout(
             runCmd(cmd),
-            COMMAND_TIMEOUT_MS,
+            commandTimeoutMs(cmd),
             "command timed out; the action may have completed, verify before retrying"
           );
           await report(cmd.id, { ok: true, data });
@@ -730,4 +918,4 @@ if (typeof chrome !== "undefined") {
   void startBridge();
 }
 
-if (typeof module !== "undefined") module.exports = { withTimeout };
+if (typeof module !== "undefined") module.exports = { withTimeout, dragEndpoints, commandTimeoutMs, asXy };

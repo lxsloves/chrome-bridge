@@ -3,11 +3,33 @@
   "name": "Chrome Bridge",
   "version": "0.3.0",
   "description": "通过本地服务操作已打开的 Chrome 标签页",
-  "permissions": ["tabs", "scripting", "activeTab", "debugger", "alarms"],
-  "host_permissions": ["<all_urls>", "http://127.0.0.1:17321/*"],
-  "background": { "service_worker": "background.js" },
+  "permissions": [
+    "tabs",
+    "scripting",
+    "activeTab",
+    "debugger",
+    "alarms"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "http://127.0.0.1:17321/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_title": "Chrome Bridge",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
   }
 }
