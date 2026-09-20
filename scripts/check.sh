@@ -25,4 +25,27 @@ else
   echo "node not found; skipped JavaScript syntax check"
 fi
 python3 -m json.tool "$ROOT/extension/manifest.json" >/dev/null
+
+# CLI formatting/flag behavior, with curl stubbed so no live daemon is needed.
+(
+  FAKE_RESPONSE='{"id":"x","ok":true,"data":[{"id":7,"title":"A B","url":"https://a.test/x"},{"id":8,"title":"Other","url":"https://b.test"}]}'
+  export FAKE_RESPONSE
+  curl() { printf '%s' "$FAKE_RESPONSE"; }
+  export -f curl
+
+  out=$("$ROOT/cb" --brief tabs a.test)
+  [[ "$out" == $'7\tA B\thttps://a.test/x' ]] || { echo "tabs --brief failed: $out" >&2; exit 1; }
+
+  FAKE_RESPONSE='{"id":"x","ok":true,"data":{"path":"/tmp/shot.jpg","elements":[{"id":1}]}}'
+  out=$("$ROOT/cb" capture --brief)
+  [[ "$out" == "{\"ok\":true,\"elements\":1,\"index\":\"$ROOT/last.txt\",\"shot\":\"/tmp/shot.jpg\"}" ]] || {
+    echo "capture --brief failed: $out" >&2
+    exit 1
+  }
+
+  FAKE_RESPONSE='{"id":"x","ok":true,"data":{"text":"hello","textPath":"/tmp/read.txt"}}'
+  out=$("$ROOT/cb" read --text)
+  [[ "$out" == "hello" ]] || { echo "read --text failed: $out" >&2; exit 1; }
+)
+
 echo "all checks passed"

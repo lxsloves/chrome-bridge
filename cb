@@ -5,12 +5,101 @@ DAEMON="${CHROME_BRIDGE_URL:-http://127.0.0.1:17321}"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 TIMEOUT="${CHROME_BRIDGE_TIMEOUT:-60}"
 
+# Allow --brief before or after the action; the daemon still returns/stores the
+# full result, but stdout stays small for agent loops.
+BRIEF=0
+ARGS=()
+for arg in "$@"; do
+  if [[ "$arg" == "--brief" ]]; then
+    BRIEF=1
+  else
+    ARGS+=("$arg")
+  fi
+done
+if (( ${#ARGS[@]} )); then set -- "${ARGS[@]}"; else set --; fi
+
+# read --text prints only the page text; the full result remains on disk.
+TEXT_MODE=0
+if [[ "${1:-}" == "read" ]]; then
+  ARGS=()
+  for arg in "$@"; do
+    if [[ "$arg" == "--text" ]]; then
+      TEXT_MODE=1
+    else
+      ARGS+=("$arg")
+    fi
+  done
+  if (( ${#ARGS[@]} )); then set -- "${ARGS[@]}"; else set --; fi
+fi
+
 post() {
   response=$(curl -sS -m "$TIMEOUT" -X POST "$DAEMON/cmd" \
     -H 'Content-Type: application/json' \
     --data-binary "$1")
-  printf '%s\n' "$response"
-  printf '%s' "$response" | python3 -c 'import json,sys; data=json.load(sys.stdin); raise SystemExit(0 if data.get("ok") else 1)'
+  printf '%s' "$response" | \
+    BRIDGE_BRIEF="$BRIEF" BRIDGE_ROOT="$ROOT" CB_POST_MODE="${CB_POST_MODE:-json}" \
+    CB_TABS_MODE="${CB_TABS_MODE:-0}" CB_TABS_FILTER="${CB_TABS_FILTER:-}" \
+    python3 -c '
+import json, os, sys
+
+try:
+    r = json.load(sys.stdin)
+except json.JSONDecodeError as e:
+    print("invalid daemon response: " + str(e), file=sys.stderr)
+    raise SystemExit(1)
+
+brief = os.environ.get("BRIDGE_BRIEF") == "1"
+root = os.environ["BRIDGE_ROOT"]
+data = r.get("data") if isinstance(r, dict) else None
+
+if os.environ.get("CB_TABS_MODE") == "1":
+    if os.environ.get("CB_TABS_FILTER") and isinstance(data, list):
+        needle = os.environ["CB_TABS_FILTER"].casefold()
+        data = [
+            t for t in data
+            if needle in (str(t.get("title") or "") + "\n" + str(t.get("url") or "")).casefold()
+        ]
+        r["data"] = data
+    if brief and isinstance(data, list):
+        if not r.get("ok"):
+            print(json.dumps(r, ensure_ascii=False), file=sys.stderr)
+            raise SystemExit(1)
+        for t in data:
+            title = " ".join(str(t.get("title") or "").split())
+            url = " ".join(str(t.get("url") or "").split())
+            print(str(t.get("id", "")) + "\t" + title + "\t" + url)
+        raise SystemExit(0)
+
+if os.environ.get("CB_POST_MODE") == "text":
+    if isinstance(r, dict) and r.get("ok") and isinstance(data, dict) and isinstance(data.get("text"), str):
+        sys.stdout.write(data["text"])
+        if data["text"] and not data["text"].endswith("\n"):
+            sys.stdout.write("\n")
+        raise SystemExit(0)
+    print(json.dumps(r, ensure_ascii=False), file=sys.stderr)
+    raise SystemExit(1)
+
+if brief and isinstance(r, dict):
+    out = {"ok": bool(r.get("ok"))}
+    if isinstance(data, dict):
+        elements = data.get("elements")
+        if isinstance(elements, list):
+            out["elements"] = len(elements)
+            out["index"] = os.path.join(root, "last.txt")
+            if isinstance(data.get("path"), str):
+                out["shot"] = data["path"]
+        text = data.get("text")
+        if isinstance(text, str):
+            out["textPath"] = data.get("textPath") or os.path.join(root, "last-read.txt")
+            out["chars"] = len(text)
+    if not out["ok"] and r.get("error"):
+        out["error"] = r["error"]
+    print(json.dumps(out, ensure_ascii=False, separators=(",", ":")))
+    raise SystemExit(0 if out["ok"] else 1)
+
+print(json.dumps(r, ensure_ascii=False))
+raise SystemExit(0 if isinstance(r, dict) and r.get("ok") else 1)
+'
 }
 
 json() {
@@ -20,14 +109,15 @@ json() {
 usage() {
   cat <<'EOF'
 usage:
+  cb [--brief] <command> [args]
   cb start
   cb health
-  cb tabs
+  cb tabs [urlContains]
   cb open <url>
   cb focus <tabId>
   cb close <tabId>
-  cb capture [urlContains] [mode]     # som|vision|ax
-  cb read [urlContains] [selector] [maxChars]
+  cb capture [urlContains] [mode]      # som|vision|ax
+  cb read [urlContains] [selector] [maxChars] [--text]
   cb click <elementId> [urlContains]
   cb type <elementId> <text> [urlContains]
   cb fill <elementId> <text> [urlContains]
@@ -36,6 +126,8 @@ usage:
   cb wait <seconds>
   cb wait-for <text> [urlContains] [selector] [timeoutMs]
   cb raw '<json>'
+
+  --brief: compact JSON (tabs --brief: id/title/url one per line)
 EOF
 }
 
@@ -56,7 +148,7 @@ case "${1:-}" in
     printf '%s' "$response" | python3 -c 'import json,sys; data=json.load(sys.stdin); raise SystemExit(0 if data.get("ok") and data.get("extension") else 1)'
     ;;
   tabs)
-    post '{"action":"tabs"}'
+    CB_TABS_MODE=1 CB_TABS_FILTER="${2:-}" post '{"action":"tabs"}'
     ;;
   open)
     [[ $# -ge 2 ]] || { usage; exit 2; }
@@ -101,9 +193,10 @@ PY
 )
     fi
     post "$body"
-    echo
-    echo "shot: $ROOT/last.jpg"
-    echo "index: $ROOT/last.txt"
+    if [[ "$BRIEF" != 1 ]]; then
+      echo "shot: $ROOT/last.jpg" >&2
+      echo "index: $ROOT/last.txt" >&2
+    fi
     ;;
   read)
     url="${2:-}"; selector="${3:-}"; max_chars="${4:-30000}"
@@ -117,8 +210,11 @@ if os.environ.get("SELECTOR"):
 print(json.dumps(d))
 PY
 )
-    post "$body"
-    echo
+    if [[ "$TEXT_MODE" == 1 ]]; then
+      CB_POST_MODE=text post "$body"
+    else
+      post "$body"
+    fi
     ;;
   click)
     [[ $# -ge 2 ]] || { usage; exit 2; }
@@ -132,9 +228,10 @@ print(json.dumps(d))
 PY
 )
     post "$body"
-    echo
-    echo "shot: $ROOT/last.jpg"
-    echo "index: $ROOT/last.txt"
+    if [[ "$BRIEF" != 1 ]]; then
+      echo "shot: $ROOT/last.jpg" >&2
+      echo "index: $ROOT/last.txt" >&2
+    fi
     ;;
   type)
     [[ $# -ge 3 ]] || { usage; exit 2; }

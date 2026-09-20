@@ -48,9 +48,10 @@ cd chrome-bridge
 ```bash
 CB=~/.chrome-bridge/cb
 
-$CB tabs                         # 查看当前标签页
-$CB read github.com              # 读取匹配页面的正文
-$CB capture github.com           # 截图并标出可交互元素
+$CB tabs --brief                 # 一行一个：id/title/url
+$CB tabs github.com              # 只看匹配的标签页
+$CB read github.com --text       # 只输出正文
+$CB capture github.com --brief   # 只回文件路径和元素数
 $CB click 7 github.com           # 点击截图中编号为 7 的元素
 $CB fill 12 "hello" github.com   # 清空输入框并填入文字
 $CB wait-for "保存成功" github.com
@@ -66,6 +67,10 @@ $CB wait-for "保存成功" github.com
 
 `read` 的结果同时写入 `last-read.txt`。这些文件只留在本机，下一次操作会覆盖旧内容。
 
+agent 循环里建议给 `capture`、`click`、`read` 等命令加 `--brief`：完整结果仍写入
+`last.json` / `last-read.txt`，stdout 只回 `ok`、文件路径和元素数，避免每轮重复吞整页数据。
+`shot:` / `index:` 这类人类提示走 stderr，不影响管道里的 JSON。
+
 页面跳转或界面发生明显变化后，原来的元素编号可能已经失效，继续操作前应重新执行一次 `capture`。
 
 ## 常用命令
@@ -73,12 +78,12 @@ $CB wait-for "保存成功" github.com
 ```text
 cb start
 cb health
-cb tabs
+cb [--brief] tabs [urlContains]              # --brief: id/title/url one per line
 cb open <url>
 cb focus <tabId>
 cb close <tabId>
-cb capture [urlContains] [mode]        # som | vision | ax
-cb read [urlContains] [selector] [maxChars]
+cb [--brief] capture [urlContains] [mode]    # som | vision | ax
+cb read [urlContains] [selector] [maxChars] [--text] [--brief]
 cb click <elementId> [urlContains]
 cb type <elementId> <text> [urlContains]
 cb fill <elementId> <text> [urlContains]

@@ -68,19 +68,20 @@ must click **Reload** on `chrome://extensions/`.
 
 ## Workflow
 
-1. Run `cb tabs` and identify the exact tab. If a URL fragment matches more
-   than one tab, use raw JSON with the returned `tabId`.
-2. For lookup or document-reading tasks, start with `cb read`. Avoid screenshots
-   when page text answers the question.
-3. For interaction or visual inspection, run `cb capture`, then read both
-   `last.jpg` and `last.txt`.
+1. Run `cb tabs <substr> --brief` and identify the exact tab (`id/title/url`
+   one per line). If a URL fragment matches more than one tab, use raw JSON
+   with the returned `tabId`.
+2. For lookup or document-reading tasks, start with `cb read ... --text`.
+   Avoid screenshots when page text answers the question.
+3. For interaction or visual inspection, run `cb capture ... --brief`, then
+   read both `last.jpg` and `last.txt`.
 4. Act with `element=N`; use coordinates only for canvas-drawn controls.
 5. Verify every state-changing action with `capture_after:true`, `cb read`, or
    `cb wait-for`.
 
 ```bash
-cb read lanhuapp.com
-cb capture lanhuapp.com
+cb read lanhuapp.com --text
+cb capture lanhuapp.com --brief
 # Read last.jpg + last.txt
 cb click 15 lanhuapp.com
 ```
@@ -96,12 +97,12 @@ cb raw '{"action":"click","coordinate":[120,340],"urlContains":"lanhuapp.com","c
 
 ```bash
 cb health
-cb tabs
+cb [--brief] tabs [urlContains]     # --brief: id/title/url one per line
 cb open <url>
 cb focus <tabId>
 cb close <tabId>
-cb capture [urlContains] [mode]     # mode: som|vision|ax  (default som)
-cb read [urlContains] [selector] [maxChars]
+cb [--brief] capture [urlContains] [mode]  # mode: som|vision|ax (default som)
+cb read [urlContains] [selector] [maxChars] [--text] [--brief]
 cb click <elementId> [urlContains]
 cb type <elementId> <text> [urlContains] # insert text
 cb fill <elementId> <text> [urlContains] # replace current value
@@ -112,6 +113,9 @@ cb wait <seconds>
 cb wait-for <text> [urlContains] [selector] [timeoutMs]
 cb raw '<json>'                     # any daemon action
 ```
+
+`--brief` 可放在 action 前后：完整结果仍写入文件，stdout 只回 `ok`、文件路径和
+元素数（`tabs --brief` 为 id/title/url 行）。`read --text` 只输出正文。
 
 ## Actions (raw JSON)
 
