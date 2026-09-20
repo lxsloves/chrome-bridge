@@ -226,6 +226,27 @@ function injectRead(selector, maxChars) {
   if (!root) throw new Error(`no element matching ${selector}`);
   const text = (root.innerText || root.textContent || "").replace(/\u00a0/g, " ");
   const limit = Math.max(1, Math.min(Number(maxChars) || 30000, 100000));
+
+  // 页面上所有真链接的绝对地址。
+  //
+  // 为什么要专门给这个:read 只回文本,而文本里没有地址 —— 于是「搜索页列出的帖子」
+  // 够不到「帖子的正文页」:看得见标题,拿不到 /p/12345。凡是「先列出来再点进去」的
+  // 站点(贴吧、论坛、商城)都卡在这一步。摘链接是唯一能把「列出来」变成「能点进去」的。
+  //
+  // 必须在函数体内联展开:executeScript 传过去的是这个函数的源码,引用外部变量会 undefined。
+  // 链接上限 250 条:导航和页脚也算,不设上限时一个页面能塞进来上千条。
+  const seen = new Set();
+  const links = [];
+  for (const a of root.querySelectorAll("a[href]")) {
+    const href = a.href || "";
+    if (!/^https?:/i.test(href) || seen.has(href)) continue;
+    const label = (a.innerText || a.textContent || "").trim().replace(/\s+/g, " ");
+    if (!label) continue; // 图标/占位链接:点进去也不知道是哪一条,不如不给
+    seen.add(href);
+    links.push({ text: label.slice(0, 120), href });
+    if (links.length >= 250) break;
+  }
+
   return {
     title: document.title,
     url: location.href,
@@ -233,6 +254,7 @@ function injectRead(selector, maxChars) {
     text: text.slice(0, limit),
     length: text.length,
     truncated: text.length > limit,
+    links,
   };
 }
 
