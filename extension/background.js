@@ -696,6 +696,12 @@ async function handle(cmd) {
     return { ok: true, tabId };
   }
   if (action === "close") {
+    // 关标签页是破坏性动作,绝不能猜。resolveTab 在没有 tabId/urlContains 时会退回到
+    // 「当前活动标签页」—— 对 read/capture 那是有用的默认,对 close 就是把用户正在看的
+    // 那一页关掉。实测踩过:调用方漏传 tabId,人正在看的网页直接消失。
+    if (cmd.tabId == null && !cmd.urlContains) {
+      throw new Error("close needs an explicit tabId (or urlContains); refusing to guess and close someone's page");
+    }
     const tab = await chrome.tabs.get(tabId);
     await chrome.tabs.remove(tabId);
     cache.delete(tabId);
